@@ -4,6 +4,7 @@ import psutil
 from datetime import datetime, timedelta
 import time
 import pandas as pd
+import os
 
 
 def track(args) -> None:
@@ -33,7 +34,13 @@ def track(args) -> None:
                                      "packets_recv",
                                      "bytes_sent",
                                      "bytes_recv"])
-    print(df)
+
+    df.to_csv(f'results/s{args.sample}-d{args.duration}-{datetime.today().strftime("%H:%M:%S")}-sysmetrics.csv')
+
+
+def setup() -> None:
+    if not os.path.exists("results"):
+        os.makedirs("results")
 
 
 def main() -> None:
@@ -43,6 +50,8 @@ def main() -> None:
     parser.add_argument('-d', '--duration', help='The duration you want to measure the system for in minutes',
                         default=5)
     args = parser.parse_args()
+
+    setup()
     track(args)
 
 
