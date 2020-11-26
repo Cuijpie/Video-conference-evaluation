@@ -11,28 +11,20 @@ import pyshark
 import re
 import cursor
 from ping3 import ping
-import matplotlib.pyplot as plt
 
 cpu_usage = -1
 mem_usage = -1
-packets_sent = -1
-packets_recv = -1
-bytes_sent = -1
-bytes_recv = -1
 average_packet_length = -1
+packet_count = 0
 
 
 def _monitor(end_time: datetime) -> None:
     cursor.hide()
-    print('cpu_usage', '\t', 'mem_usage', '\t\t\t', 'packets_sent', '\t', 'packets_recv', '\t', 'bytes_sent', '\t',
-          'bytes_recv', '\t\t', 'Avg_packet_length', '\t')
+    print('cpu_usage', '\t', 'mem_usage', '\t\t', 'Packet_count', '\t', 'Avg_packet_length', '\t')
 
     while end_time >= datetime.now():
         sys.stdout.write(
-            '\r ' + str(cpu_usage) + '\t\t' + str(mem_usage) + '\t\t' + str(packets_sent) + '\t\t' +
-            str(packets_recv) + '\t\t' + str(bytes_sent) + '\t\t' + str(bytes_recv) + '\t\t' + str(
-                average_packet_length) +
-            '\t\t')
+            '\r ' + str(cpu_usage) + '\t\t' + str(mem_usage) + '\t\t' + str(average_packet_length) + '\t\t' + str(packet_count) + '\t')
         sys.stdout.flush()
 
 
@@ -48,28 +40,32 @@ def _ping(end_time: datetime, ips: list) -> None:
     df.to_csv(f'results/ping/{datetime.today().strftime("%H:%M")}-ping-metrics.csv')
 
 
-def _track_network_packets(display_filter: str, sample: int, end_time: datetime) -> None:
+def _track_metrics(pid: int, display_filter: str, sample: int, end_time: datetime) -> None:
+    global average_packet_length, cpu_usage, mem_usage, packet_count
+    _process = psutil.Process(pid)
+    sample_time = datetime.now() + timedelta(seconds=sample)
     capture = pyshark.LiveCapture(interface='enp6s0',
                                   display_filter=display_filter)
 
     data = []
     packet_length = []
-    packet_count = 0
 
-    sample_time = datetime.now() + timedelta(seconds=sample)
     for packet in capture.sniff_continuously():
         packet_length.append(int(packet[1].get('len')))
         packet_count += 1
+
         if sample_time < datetime.now():
             sample_time = datetime.now() + timedelta(seconds=sample)
 
-            global average_packet_length
             average_packet_length = round(sum(packet_length) / len(packet_length)) if len(packet_length) != 0 else 0
-
+            cpu_usage = _process.cpu_percent()
+            mem_usage = _process.memory_percent()
             data.append([
                 datetime.now(),
                 average_packet_length,
-                packet_count
+                packet_count,
+                cpu_usage,
+                mem_usage
             ])
 
             packet_length.clear()
@@ -79,39 +75,9 @@ def _track_network_packets(display_filter: str, sample: int, end_time: datetime)
 
     df = pd.DataFrame(data, columns=['time',
                                      'avg_packet_len',
-                                     'packet_count'])
-    df.to_csv(f'results/packets/{datetime.today().strftime("%H:%M")}-packet-metrics.csv')
-
-
-def _track_system_metrics(pid: int, sample: int, end_time: datetime) -> None:
-    global packets_sent, packets_recv, bytes_sent, bytes_recv, cpu_usage, mem_usage
-    _process = psutil.Process(pid)
-
-    data = []
-    try:
-        while end_time >= datetime.now():
-            net_io_counter_t1 = psutil.net_io_counters()
-            time.sleep(sample)
-            net_io_counter_t2 = psutil.net_io_counters()
-
-            packets_sent = net_io_counter_t2.packets_sent - net_io_counter_t1.packets_sent
-            packets_recv = net_io_counter_t2.packets_recv - net_io_counter_t1.packets_recv
-            bytes_sent = net_io_counter_t2.bytes_sent - net_io_counter_t1.bytes_sent
-            bytes_recv = net_io_counter_t2.bytes_recv - net_io_counter_t1.bytes_recv
-            cpu_usage = _process.cpu_percent()
-            mem_usage = _process.memory_percent()
-
-            data.append([datetime.now(), cpu_usage, mem_usage, packets_sent, packets_recv, bytes_sent, bytes_recv])
-    except KeyboardInterrupt:
-        pass
-
-    df = pd.DataFrame(data, columns=['time',
+                                     'packet_count',
                                      'cpu_usage',
-                                     'mem_usage',
-                                     "packets_sent",
-                                     "packets_recv",
-                                     "bytes_sent",
-                                     "bytes_recv"])
+                                     'mem_usage'])
     df.to_csv(f'results/system/{datetime.today().strftime("%H:%M")}-system-metrics.csv')
 
 
@@ -134,8 +100,6 @@ def _get_display_filter(pid: int) -> str:
 def _setup(args) -> tuple:
     if not os.path.exists("results"):
         os.makedirs("results")
-    if not os.path.exists("results/packets"):
-        os.makedirs("results/packets")
     if not os.path.exists("results/system"):
         os.makedirs("results/system")
     if not os.path.exists("results/ping"):
@@ -148,20 +112,17 @@ def _setup(args) -> tuple:
     return pid, end_time
 
 
-def _throttle_cpu(pid: int, end_time: datetime, limit: int):
-    os.system(f'cpulimit -p {pid} -l {limit}')
-    while end_time >= datetime.now():
-        print("test")
-    os.system(f'cpulimit -p {pid} -l 100')
+def _throttle_cpu(pid: int, limit: int):
+    os.system(f'cpulimit -b -p {pid} -l {limit}')
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--process', help='Process you want to measure', default="zoom")
-    parser.add_argument('-d', '--duration', help='Duration you want to measure the system for in minutes', default=1)
-    parser.add_argument('-s', '--sample', help='Sample size in seconds', default=1)
-    parser.add_argument('-ct', '--cputhrottle', help='Limit cpu usage for given process', default=-1)
-    parser.add_argument('-r', '--runs', help='Number of repetitions', default=1)
+    parser.add_argument('-d', '--duration', type=int, help='Duration you want to measure the system for in minutes',
+                        default=1)
+    parser.add_argument('-s', '--sample', type=int, help='Sample size in seconds', default=1)
+    parser.add_argument('-ct', '--cputhrottle', type=int, help='Limit cpu usage for given process', default=-1)
     args = parser.parse_args()
 
     pid, end_time = _setup(args)
@@ -172,17 +133,14 @@ def main() -> None:
         print(f'Set CPU throttling to {args.cputhrottle} percent...')
         threading.Thread(target=_throttle_cpu, args=[pid, end_time, args.cputhrottle]).start()
 
-    print('Tracking system metrics...')
-    threading.Thread(target=_track_system_metrics, args=[pid, args.sample, end_time]).start()
-
-    print('Tracking network packets...')
-    threading.Thread(target=_track_network_packets, args=[_get_display_filter(pid), args.sample, end_time]).start()
+    print('Tracking metrics...')
+    threading.Thread(target=_track_metrics, args=[pid, _get_display_filter(pid), args.sample, end_time]).start()
 
     print('Staring pinging IPs...')
     threading.Thread(target=_ping, args=[end_time, _get_ip_addresses(pid)]).start()
 
-    # print('Start monitor...')
-    # threading.Thread(target=_monitor, args=[end_time]).start()
+    print('Start monitor...')
+    threading.Thread(target=_monitor, args=[end_time]).start()
 
 
 if __name__ == "__main__":
