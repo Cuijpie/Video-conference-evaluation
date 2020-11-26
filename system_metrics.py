@@ -2,7 +2,6 @@
 import argparse
 import psutil
 from datetime import datetime, timedelta
-import time
 import pandas as pd
 import os
 import sys
@@ -35,8 +34,8 @@ def _ping(end_time: datetime, ips: list) -> None:
         tmp = [str(ping(ip)) for ip in ips]
         tmp = [str(datetime.now())] + tmp
         data.append(tmp)
-
     df = pd.DataFrame(data, columns=cols)
+
     df.to_csv(f'results/ping/{datetime.today().strftime("%H:%M")}-ping-metrics.csv')
 
 
@@ -131,13 +130,13 @@ def main() -> None:
 
     if args.cputhrottle != -1:
         print(f'Set CPU throttling to {args.cputhrottle} percent...')
-        threading.Thread(target=_throttle_cpu, args=[pid, end_time, args.cputhrottle]).start()
+        threading.Thread(target=_throttle_cpu, args=[pid, args.cputhrottle]).start()
 
     print('Tracking metrics...')
     threading.Thread(target=_track_metrics, args=[pid, _get_display_filter(pid), args.sample, end_time]).start()
 
-    print('Staring pinging IPs...')
-    threading.Thread(target=_ping, args=[end_time, _get_ip_addresses(pid)]).start()
+    # print('Staring pinging IPs...')
+    # threading.Thread(target=_ping, args=[end_time, _get_ip_addresses(pid)]).start()
 
     print('Start monitor...')
     threading.Thread(target=_monitor, args=[end_time]).start()
