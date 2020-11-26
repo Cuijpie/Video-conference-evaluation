@@ -11,6 +11,7 @@ import pyshark
 import re
 import cursor
 from ping3 import ping
+import matplotlib.pyplot as plt
 
 cpu_usage = -1
 mem_usage = -1
@@ -35,12 +36,11 @@ def _monitor(end_time: datetime) -> None:
         sys.stdout.flush()
 
 
-def _ping(end_time: datetime, ips: list):
+def _ping(end_time: datetime, ips: list) -> None:
     data = []
     cols = ['time'] + ips
     while end_time >= datetime.now():
         tmp = [str(ping(ip)) for ip in ips]
-        print(tmp)
         tmp = [str(datetime.now())] + tmp
         data.append(tmp)
 
@@ -54,9 +54,12 @@ def _track_network_packets(display_filter: str, sample: int, end_time: datetime)
 
     data = []
     packet_length = []
+    packet_count = 0
+
     sample_time = datetime.now() + timedelta(seconds=sample)
     for packet in capture.sniff_continuously():
         packet_length.append(int(packet[1].get('len')))
+        packet_count += 1
         if sample_time < datetime.now():
             sample_time = datetime.now() + timedelta(seconds=sample)
 
@@ -65,15 +68,18 @@ def _track_network_packets(display_filter: str, sample: int, end_time: datetime)
 
             data.append([
                 datetime.now(),
-                average_packet_length
+                average_packet_length,
+                packet_count
             ])
 
             packet_length.clear()
+            packet_count = 0
         if end_time < datetime.now():
             break
 
     df = pd.DataFrame(data, columns=['time',
-                                     'avg_packet_len'])
+                                     'avg_packet_len',
+                                     'packet_count'])
     df.to_csv(f'results/packets/{datetime.today().strftime("%H:%M")}-packet-metrics.csv')
 
 
@@ -111,7 +117,8 @@ def _track_system_metrics(pid: int, sample: int, end_time: datetime) -> None:
 
 def _get_ip_addresses(pid: int) -> list:
     ips = []
-    for entry in os.popen(f"echo $(lsof -p {pid} | grep TCP | grep ESTABLISHED | awk '{{print $9}}')").read().split():
+    for entry in os.popen(
+            f"echo $(lsof -e /run/user/1000/gvfs -e /run/user/1000/doc -p {pid} | grep TCP | grep ESTABLISHED | awk '{{print $9}}')").read().split():
         if "ec2" in entry:
             raw_ip = re.search("ec2-(.+?)\\.", entry).group(1)
             ips.append(raw_ip.replace("-", "."))
@@ -141,12 +148,20 @@ def _setup(args) -> tuple:
     return pid, end_time
 
 
+def _throttle_cpu(pid: int, end_time: datetime, limit: int):
+    os.system(f'cpulimit -p {pid} -l {limit}')
+    while end_time >= datetime.now():
+        print("test")
+    os.system(f'cpulimit -p {pid} -l 100')
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--process', help='Process you want to measure', default="zoom")
     parser.add_argument('-d', '--duration', help='Duration you want to measure the system for in minutes', default=1)
     parser.add_argument('-s', '--sample', help='Sample size in seconds', default=1)
     parser.add_argument('-ct', '--cputhrottle', help='Limit cpu usage for given process', default=-1)
+    parser.add_argument('-r', '--runs', help='Number of repetitions', default=1)
     args = parser.parse_args()
 
     pid, end_time = _setup(args)
@@ -155,7 +170,7 @@ def main() -> None:
 
     if args.cputhrottle != -1:
         print(f'Set CPU throttling to {args.cputhrottle} percent...')
-        threading.Thread(target=lambda x: os.system(f'cpulimit -p {pid} -l {args.cputhrottle}'), args=[pid]).start()
+        threading.Thread(target=_throttle_cpu, args=[pid, end_time, args.cputhrottle]).start()
 
     print('Tracking system metrics...')
     threading.Thread(target=_track_system_metrics, args=[pid, args.sample, end_time]).start()
@@ -166,8 +181,8 @@ def main() -> None:
     print('Staring pinging IPs...')
     threading.Thread(target=_ping, args=[end_time, _get_ip_addresses(pid)]).start()
 
-    print('Start monitor...')
-    threading.Thread(target=_monitor, args=[end_time]).start()
+    # print('Start monitor...')
+    # threading.Thread(target=_monitor, args=[end_time]).start()
 
 
 if __name__ == "__main__":
