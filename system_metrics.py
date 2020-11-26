@@ -154,10 +154,16 @@ def _throttle_cpu(pid: int, end_time: datetime, limit: int):
         print("test")
     os.system(f'cpulimit -p {pid} -l 100')
 
+def _start_throttle_bandwidth(bandwidth):
+    os.system(f'wondershaper -a eno1 {bandwidth} {bandwidth}')
+
+def _stop_throttle_bandwidth():
+    os.system(f'wondershaper clear eno1')
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--process', help='Process you want to measure', default="zoom")
+    parser.add_argument('-i', '--process', help='Process you want to measure', default="zoom")
     parser.add_argument('-d', '--duration', help='Duration you want to measure the system for in minutes', default=1)
     parser.add_argument('-s', '--sample', help='Sample size in seconds', default=1)
     parser.add_argument('-ct', '--cputhrottle', help='Limit cpu usage for given process', default=-1)
@@ -165,7 +171,11 @@ def main() -> None:
     args = parser.parse_args()
 
     pid, end_time = _setup(args)
-
+    
+    print('Initialize...')
+    _throttle_bandwidth(50)
+    sys.exit()
+    
     print('Initialize...')
 
     if args.cputhrottle != -1:
@@ -178,9 +188,11 @@ def main() -> None:
     print('Tracking network packets...')
     threading.Thread(target=_track_network_packets, args=[_get_display_filter(pid), args.sample, end_time]).start()
 
-    print('Staring pinging IPs...')
-    threading.Thread(target=_ping, args=[end_time, _get_ip_addresses(pid)]).start()
-
+    #print('Staring pinging IPs...')
+    #threading.Thread(target=_ping, args=[end_time, _get_ip_addresses(pid)]).start()
+    
+    
+    
     # print('Start monitor...')
     # threading.Thread(target=_monitor, args=[end_time]).start()
 
