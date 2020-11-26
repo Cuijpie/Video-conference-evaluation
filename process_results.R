@@ -3,10 +3,12 @@ library(dplyr)
 library(ggplot2)
 
 ###########################
-system_files <- list.files(pattern = "system-metrics.csv$", recursive = TRUE)
-ping_files <- list.files(pattern = "ping-metrics.csv$", recursive = TRUE)
+video_files <- list.files(pattern = "system-metrics-audio-video.csv$", recursive = TRUE)
+audio_files <- list.files(pattern = "system-metrics-audio-only.csv$", recursive = TRUE)
 line_color <- c("#03045e", "#006600")
 prob <- c(0.25, 0.75)
+
+exps = c(video_files, audio_files)
 ###########################
 
 data <- NA
