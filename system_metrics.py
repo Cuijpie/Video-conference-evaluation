@@ -11,28 +11,23 @@ import pyshark
 import re
 import cursor
 from ping3 import ping
+
 import matplotlib.pyplot as plt
 
 cpu_usage = -1
 mem_usage = -1
-packets_sent = -1
-packets_recv = -1
-bytes_sent = -1
-bytes_recv = -1
 average_packet_length = -1
+packet_count = 0
+bandwidth = -1
 
 
 def _monitor(end_time: datetime) -> None:
     cursor.hide()
-    print('cpu_usage', '\t', 'mem_usage', '\t\t\t', 'packets_sent', '\t', 'packets_recv', '\t', 'bytes_sent', '\t',
-          'bytes_recv', '\t\t', 'Avg_packet_length', '\t')
+    print('cpu_usage', '\t', 'mem_usage', '\t\t', 'Packet_count', '\t', 'Avg_packet_length', '\t', 'Bandwidth')
 
     while end_time >= datetime.now():
         sys.stdout.write(
-            '\r ' + str(cpu_usage) + '\t\t' + str(mem_usage) + '\t\t' + str(packets_sent) + '\t\t' +
-            str(packets_recv) + '\t\t' + str(bytes_sent) + '\t\t' + str(bytes_recv) + '\t\t' + str(
-                average_packet_length) +
-            '\t\t')
+            '\r ' + str(cpu_usage) + '\t\t' + str(mem_usage) + '\t\t' + str(average_packet_length) + '\t\t' + str(packet_count) + '\t\t' + str(bandwidth) + '\t')
         sys.stdout.flush()
 
 
@@ -48,70 +43,105 @@ def _ping(end_time: datetime, ips: list) -> None:
     df.to_csv(f'results/ping/{datetime.today().strftime("%H:%M")}-ping-metrics.csv')
 
 
-def _track_network_packets(display_filter: str, sample: int, end_time: datetime) -> None:
-    capture = pyshark.LiveCapture(interface='enp6s0',
+def _track_metrics(pid: int, display_filter: str, sample: int, end_time: datetime, interface: str, bandwidth_change_in: int, cpu_change_in: int) -> None:
+    global average_packet_length, cpu_usage, mem_usage, packet_count, bandwidth
+    _process = psutil.Process(pid)
+    sample_time = datetime.now() + timedelta(seconds=sample)
+    capture = pyshark.LiveCapture(interface=interface,
                                   display_filter=display_filter)
-
+    
     data = []
     packet_length = []
-    packet_count = 0
+    
+    # Parameters for bandwidth throttling.
+    bw_start = 500
+    bw_run = False
+    bw_throttle = 0
+    bw_change = timedelta(minutes=bandwidth_change_in)
+    bw_time = datetime.now()
+    
+    # Parameters for cpu throttling.
+    cpu_start = 20
+    cpu_run = False
+    cpu_throttle = 0
+    cpu_change = timedelta(minutes=cpu_change_in)
+    cpu_time = datetime.now()
+    
+    # Parameter for bandwidth
+    net_io_counter = psutil.net_io_counters()
 
-    sample_time = datetime.now() + timedelta(seconds=sample)
-    for packet in capture.sniff_continuously():
-        packet_length.append(int(packet[1].get('len')))
-        packet_count += 1
-        if sample_time < datetime.now():
-            sample_time = datetime.now() + timedelta(seconds=sample)
+    try:
+        for packet in capture.sniff_continuously():
+            
+            packet_length.append(int(packet[1].get('len')))
+            packet_count += 1
 
-            global average_packet_length
-            average_packet_length = round(sum(packet_length) / len(packet_length)) if len(packet_length) != 0 else 0
+            if sample_time < datetime.now():
+                sample_time = datetime.now() + timedelta(seconds=sample)
 
-            data.append([
-                datetime.now(),
-                average_packet_length,
-                packet_count
-            ])
+                average_packet_length = round(sum(packet_length) / len(packet_length)) if len(packet_length) != 0 else 0
+                
+                cpu_usage = _process.cpu_percent()
+                mem_usage = _process.memory_percent()
+                
+                net_io_counter_t = psutil.net_io_counters()
+                bandwidth = net_io_counter_t.bytes_recv - net_io_counter.bytes_recv 
+                net_io_counter = net_io_counter_t
+                
+                data.append([
+                    datetime.now(),
+                    average_packet_length,
+                    packet_count,
+                    cpu_usage,
+                    mem_usage,
+                    packet_count * average_packet_length,
+                    bandwidth,
+                    bw_throttle * 1000,
+                    cpu_throttle      
+                ])
 
-            packet_length.clear()
-            packet_count = 0
-        if end_time < datetime.now():
-            break
+                packet_length.clear()
+                packet_count = 0
+            
+                # Adjust bandwidth throttling.
+                if bandwidth_change_in > 0 and datetime.now() > bw_time + bw_change:
+                    if bw_throttle == 0:
+                        bw_run = True
+                        bw_throttle = bw_start
+                    else:
+                        bw_throttle = bw_throttle - 50
+                    _start_throttle_bandwidth(bw_throttle)
+                    bw_time = datetime.now()
+                
+                # Adjust cpu throttling.
+                if cpu_change_in > 0 and datetime.now() > cpu_time + cpu_change:
+                    if cpu_throttle == 0:
+                        cpu_run = True
+                        cpu_throttle = cpu_start
+                    else:
+                        cpu_throttle = cpu_throttle - 1
+                    _start_throttle_cpu(cpu_throttle)
+                    cpu_time = datetime.now()               
+            
+            
+            if end_time < datetime.now() or (cpu_throttle < 1 and cpu_run) or (bw_throttle < 50 and bw_run):
+                break
+            
+    except Exception as e:
+        print(e)
+            
+    if int(bandwidth_change_in) > 0:
+        _stop_throttle_bandwidth()
 
     df = pd.DataFrame(data, columns=['time',
                                      'avg_packet_len',
-                                     'packet_count'])
-    df.to_csv(f'results/packets/{datetime.today().strftime("%H:%M")}-packet-metrics.csv')
-
-
-def _track_system_metrics(pid: int, sample: int, end_time: datetime) -> None:
-    global packets_sent, packets_recv, bytes_sent, bytes_recv, cpu_usage, mem_usage
-    _process = psutil.Process(pid)
-
-    data = []
-    try:
-        while end_time >= datetime.now():
-            net_io_counter_t1 = psutil.net_io_counters()
-            time.sleep(sample)
-            net_io_counter_t2 = psutil.net_io_counters()
-
-            packets_sent = net_io_counter_t2.packets_sent - net_io_counter_t1.packets_sent
-            packets_recv = net_io_counter_t2.packets_recv - net_io_counter_t1.packets_recv
-            bytes_sent = net_io_counter_t2.bytes_sent - net_io_counter_t1.bytes_sent
-            bytes_recv = net_io_counter_t2.bytes_recv - net_io_counter_t1.bytes_recv
-            cpu_usage = _process.cpu_percent()
-            mem_usage = _process.memory_percent()
-
-            data.append([datetime.now(), cpu_usage, mem_usage, packets_sent, packets_recv, bytes_sent, bytes_recv])
-    except KeyboardInterrupt:
-        pass
-
-    df = pd.DataFrame(data, columns=['time',
+                                     'packet_count',
                                      'cpu_usage',
                                      'mem_usage',
-                                     "packets_sent",
-                                     "packets_recv",
-                                     "bytes_sent",
-                                     "bytes_recv"])
+                                     'bandwidth_calc',
+                                     'bandwidth',
+                                     'bandwidth_limit',
+                                     'cpu_limit'])                          
     df.to_csv(f'results/system/{datetime.today().strftime("%H:%M")}-system-metrics.csv')
 
 
@@ -134,8 +164,6 @@ def _get_display_filter(pid: int) -> str:
 def _setup(args) -> tuple:
     if not os.path.exists("results"):
         os.makedirs("results")
-    if not os.path.exists("results/packets"):
-        os.makedirs("results/packets")
     if not os.path.exists("results/system"):
         os.makedirs("results/system")
     if not os.path.exists("results/ping"):
@@ -143,58 +171,42 @@ def _setup(args) -> tuple:
 
     pid = [p.pid for p in psutil.process_iter() if args.process in p.name()][0]
 
-    end_time = datetime.now() + timedelta(minutes=args.duration)
-
+    end_time = datetime.now() + timedelta(minutes=int(args.duration))
+    
     return pid, end_time
 
 
-def _throttle_cpu(pid: int, end_time: datetime, limit: int):
-    os.system(f'cpulimit -p {pid} -l {limit}')
-    while end_time >= datetime.now():
-        print("test")
-    os.system(f'cpulimit -p {pid} -l 100')
+def _start_throttle_cpu(limit: int):
+    os.system(f'cpulimit -b -p {pid} -l {limit}')
 
-def _start_throttle_bandwidth(bandwidth):
-    os.system(f'wondershaper -a eno1 {bandwidth} {bandwidth}')
+def _start_throttle_bandwidth(limit: int):
+    os.system(f'wondershaper eno1 {limit} {limit}')
 
 def _stop_throttle_bandwidth():
+    print('Restore bandwidth...')
     os.system(f'wondershaper clear eno1')
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--process', help='Process you want to measure', default="zoom")
-    parser.add_argument('-i', '--process', help='Process you want to measure', default="zoom")
+    parser.add_argument('-i', '--interface', help='Network interface', default="eth0")
     parser.add_argument('-d', '--duration', help='Duration you want to measure the system for in minutes', default=1)
-    parser.add_argument('-s', '--sample', help='Sample size in seconds', default=1)
-    parser.add_argument('-ct', '--cputhrottle', help='Limit cpu usage for given process', default=-1)
-    parser.add_argument('-r', '--runs', help='Number of repetitions', default=1)
+    parser.add_argument('-b', '--bandwidth', help='Test with bandwith', default=0)
+    parser.add_argument('-c', '--cpu', help='Test with CPU', default=0)
     args = parser.parse_args()
 
+    
+    print('Initialize...')
     pid, end_time = _setup(args)
-    
-    print('Initialize...')
-    _throttle_bandwidth(50)
-    sys.exit()
-    
-    print('Initialize...')
 
-    if args.cputhrottle != -1:
-        print(f'Set CPU throttling to {args.cputhrottle} percent...')
-        threading.Thread(target=_throttle_cpu, args=[pid, end_time, args.cputhrottle]).start()
+    print('Tracking metrics...')
+    threading.Thread(target=_track_metrics, args=[pid, _get_display_filter(pid), 1, end_time, args.interface, int(args.bandwidth), int(args.cpu)]).start()
 
-    print('Tracking system metrics...')
-    threading.Thread(target=_track_system_metrics, args=[pid, args.sample, end_time]).start()
+    print('Staring pinging IPs...')
+    threading.Thread(target=_ping, args=[end_time, _get_ip_addresses(pid)]).start()
 
-    print('Tracking network packets...')
-    threading.Thread(target=_track_network_packets, args=[_get_display_filter(pid), args.sample, end_time]).start()
-
-    #print('Staring pinging IPs...')
-    #threading.Thread(target=_ping, args=[end_time, _get_ip_addresses(pid)]).start()
-    
-    
-    
-    # print('Start monitor...')
-    # threading.Thread(target=_monitor, args=[end_time]).start()
+    print('Start monitor...')
+    threading.Thread(target=_monitor, args=[end_time]).start()
 
 
 if __name__ == "__main__":
