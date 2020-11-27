@@ -2,7 +2,6 @@
 import argparse
 import psutil
 from datetime import datetime, timedelta
-import time
 import pandas as pd
 import os
 import sys
@@ -38,8 +37,8 @@ def _ping(end_time: datetime, ips: list) -> None:
         tmp = [str(ping(ip)) for ip in ips]
         tmp = [str(datetime.now())] + tmp
         data.append(tmp)
-
     df = pd.DataFrame(data, columns=cols)
+
     df.to_csv(f'results/ping/{datetime.today().strftime("%H:%M")}-ping-metrics.csv')
 
 
@@ -195,7 +194,6 @@ def main() -> None:
     parser.add_argument('-c', '--cpu', help='Test with CPU', default=0)
     args = parser.parse_args()
 
-    
     print('Initialize...')
     pid, end_time = _setup(args)
 
