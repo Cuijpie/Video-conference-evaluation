@@ -48,6 +48,11 @@ def _ping(end_time: datetime, ips: list) -> None:
 
 def _track_metrics(pid: int, display_filter: str, sample: int, end_time: datetime, interface: str,
                    bandwidth_change_in: int, cpu_change_in: int) -> None:
+    print(display_filter)
+    print(pid)
+    print(interface)
+    print(bandwidth_change_in)
+    print(cpu_change_in)
     global average_packet_length, cpu_usage, mem_usage, packet_count, bandwidth
     _process = psutil.Process(pid)
     sample_time = datetime.now() + timedelta(seconds=sample)
@@ -76,8 +81,6 @@ def _track_metrics(pid: int, display_filter: str, sample: int, end_time: datetim
 
     try:
         for packet in capture.sniff_continuously():
-            # print("sniffed")
-            # print("packet count: " + str(packet_count))
             packet_length.append(int(packet[1].get('len')))
             packet_count += 1
 
@@ -151,15 +154,19 @@ def _track_metrics(pid: int, display_filter: str, sample: int, end_time: datetim
 
 def _get_ip_addresses(pid: int) -> list:
     ips = []
+    # | grep "
+    #             f"-v akamai
     for entry in os.popen(
-            f"echo $(lsof -e /run/user/1000/gvfs -e /run/user/1000/doc -p {pid} | grep TCP | grep ESTABLISHED | grep "
-            f"-v akamai | awk '{{print $9}}')").read().split():
+            f"echo $(lsof -e /run/user/1000/gvfs -e /run/user/1000/doc -p {pid} | grep TCP | grep ESTABLISHED | awk '{{print $9}}')").read().split():
         if "ec2" in entry:
             raw_ip = re.search("ec2-(.+?)\\.", entry).group(1)
             ips.append(raw_ip.replace("-", "."))
+        elif "akamai" in entry:
+            raw_ip = re.search("->a(.+?).deploy", entry).group(1)
+            ips.append(raw_ip.replace("-", "."))
         else:
             ips.append(re.search("->(.*?):https", entry).group(1))
-    return ips
+    return ['52.209.59.107']
 
 
 def _get_display_filter(pid: int) -> str:
@@ -175,7 +182,7 @@ def _setup(process, duration) -> tuple:
         os.makedirs("results/ping")
 
     pid = [p.pid for p in psutil.process_iter() if process in p.name()][0]
-
+    print(pid)
     end_time = datetime.now() + timedelta(minutes=int(duration))
 
     return pid, end_time
@@ -186,12 +193,12 @@ def _start_throttle_cpu(pid: int, limit: int):
 
 
 def _start_throttle_bandwidth(limit: int):
-    os.system(f'wondershaper eno1 {limit} {limit}')
+    os.system(f'wondershaper enp6s0 {limit} {limit}')
 
 
 def _stop_throttle_bandwidth():
     print('Restore bandwidth...')
-    os.system(f'wondershaper clear eno1')
+    os.system(f'wondershaper clear enp6s0')
 
 
 @click.command()

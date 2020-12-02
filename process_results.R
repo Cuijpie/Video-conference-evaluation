@@ -8,7 +8,7 @@ audio_files <- list.files(pattern = "system-metrics-audio-only.csv$", recursive 
 line_color <- c("#03045e", "#006600")
 prob <- c(0.25, 0.75)
 
-exps = c(video_files, audio_files)
+exps <- c(video_files, audio_files)
 ###########################
 
 data <- NA
