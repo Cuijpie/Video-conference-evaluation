@@ -50,8 +50,8 @@ for (var in variables) {
       legend.text = element_text(size = 12),
           axis.title.y = element_blank(),
           axis.text.y = element_blank(),
-          axis.title.x = element_text(color = "black", size = 12),
-          axis.text.x = element_text(color = "black", size = 12)) +
+          axis.title.x = element_text(color = "black", size = 14),
+          axis.text.x = element_text(color = "black", size = 14)) +
     guides(fill = guide_legend(reverse=TRUE))
   
   if (var == "packet_count") {
@@ -61,7 +61,7 @@ for (var in variables) {
   } else if (var == 'bandwidth') {
     p <- p + scale_x_continuous('Average kilobytes[1000 bytes] received', limits=c(0, quantile(data[[var]], probs=0.99985))) + theme(legend.position = "none")
   } else if (var == 'cpu_usage') {
-    p <- p + scale_x_continuous('Average number of CPU cores used', limits=c(0, quantile(data[[var]], probs=0.99)))
+    p <- p + scale_x_continuous('Average number of CPU cores used', limits=c(0, quantile(data[[var]], probs=0.99))) + theme(legend.position = "none")
   }
   #print(p)
   ggsave(paste(var,".pdf", sep=''))
