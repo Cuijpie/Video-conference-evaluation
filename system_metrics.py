@@ -8,9 +8,7 @@ import os
 import sys
 import threading
 import pyshark
-import re
 import cursor
-from ping3 import ping
 import time
 import getpass
 from requests import get
@@ -26,11 +24,12 @@ average_packet_length = -1
 packet_count = 0
 bandwidth = -1
 
+
 def _monitor(end_time: datetime) -> None:
     global cpu_usage, mem_usage, average_packet_length, packet_count, bandwidth
     cursor.hide()
     print('cpu_usage', '\t', 'mem_usage', '\t', 'Avg_packet_length', '\t', 'Packet_count', '\t', 'Bandwidth')
-    
+
     try:
         while end_time >= datetime.now():
             sys.stdout.write(
@@ -38,21 +37,22 @@ def _monitor(end_time: datetime) -> None:
                 '\t\t\t' + str(packet_count) + '\t\t' + str(bandwidth) + '\t')
             sys.stdout.flush()
             time.sleep(1)
-            sys.stdout.write('\r                                                                                         ')
+            sys.stdout.write(
+                '\r                                                                                         ')
     except Exception as e:
         print(e)
 
+
 def _track_metrics(pids: list, display_filter: str, sample: int, end_time: datetime, interface: str,
                    bandwidth_change_in: int) -> None:
-    
     global average_packet_length, cpu_usage, mem_usage, packet_count, bandwidth
-    
+
     _processes = []
     for pid in pids:
         _processes.append(psutil.Process(int(pid)))
     sample_time = datetime.now() + timedelta(seconds=sample)
     capture = pyshark.LiveCapture(interface=interface, display_filter=display_filter)
-    
+
     data = []
     packet_length = []
 
@@ -75,7 +75,7 @@ def _track_metrics(pids: list, display_filter: str, sample: int, end_time: datet
                 sample_time = datetime.now() + timedelta(seconds=sample)
 
                 average_packet_length = round(sum(packet_length) / len(packet_length)) if len(packet_length) != 0 else 0
-                
+
                 cpu_usage = 0
                 mem_usage = 0
                 for _process in _processes:
@@ -129,12 +129,12 @@ def _track_metrics(pids: list, display_filter: str, sample: int, end_time: datet
                                      'bandwidth_limit'])
     df.to_csv(f'results/system/{datetime.today().strftime("%H:%M")}-system-metrics.csv')
 
-    
+
 def _get_ip_addresses(interface: str) -> list:
     # Assume that no other applications are used and the most used IP is correct.
-    
+
     count = {}
-    
+
     time_change = timedelta(seconds=30)
     time = datetime.now()
     capture = pyshark.LiveCapture(interface=interface)
@@ -142,7 +142,7 @@ def _get_ip_addresses(interface: str) -> list:
     for packet in capture.sniff_continuously():
         try:
             src = packet['ip'].src
-            dst = packet['ip'].dst 
+            dst = packet['ip'].dst
             if src in count.keys():
                 count[src] = count[src] + 1
             else:
@@ -151,7 +151,7 @@ def _get_ip_addresses(interface: str) -> list:
                 count[dst] = count[dst] + 1
             else:
                 count[dst] = 1
-            
+
             if datetime.now() > time + time_change:
                 break
         except:
@@ -159,22 +159,23 @@ def _get_ip_addresses(interface: str) -> list:
     if len(count.keys()) == 0:
         print('No packets found, check if the correct interface is used.')
         sys.exit()
-    
+
     # Remove own external IP.
     local_ip = get('https://api.ipify.org').text
     if local_ip in count.keys():
         del count[local_ip]
     max_used_ip = [k for k, v in count.items() if v == max(count.values())][0]
-    
+
     print('Automatic selected process IDs: ', max_used_ip)
     result = None
     while result not in ['Y', 'N']:
         result = input('Is IP ' + max_used_ip + ' correct? (Y/N): ')
         if result == 'N':
-              ip = input('IP address of meeting software: ')
-              return [ip]
+            ip = input('IP address of meeting software: ')
+            return [ip]
         else:
             return [max_used_ip]
+
 
 def _get_display_filter(interface: str) -> str:
     return 'ip.addr == ' + ' || ip.addr == '.join(_get_ip_addresses(interface))
@@ -183,16 +184,16 @@ def _get_display_filter(interface: str) -> str:
 def _get_pid_from_user():
     pids = input("Give list of process IDs ';' seperated: ")
     return pids.split(';')
-    
+
+
 def _setup(process, duration) -> tuple:
     if not os.path.exists("results"):
         os.makedirs("results")
     if not os.path.exists("results/system"):
         os.makedirs("results/system")
-    if not os.path.exists("results/ping"):
-        os.makedirs("results/ping")
-    
-    pids = [p.pid for p in psutil.process_iter() if len(p.name()) >= len(process) and process == p.name()[:len(process)]]
+
+    pids = [p.pid for p in psutil.process_iter() if
+            len(p.name()) >= len(process) and process == p.name()[:len(process)]]
     if len(pids) == 0:
         # Ask the user for the Process IDs
         user_name = getpass.getuser()
@@ -208,12 +209,13 @@ def _setup(process, duration) -> tuple:
         while result not in ['Y', 'N']:
             result = input('Are process IDs ' + str(pids) + ' correct? (Y/N): ')
             if result == 'N':
-              pids = _get_pid_from_user()
-              break
-    
+                pids = _get_pid_from_user()
+                break
+
     end_time = datetime.now() + timedelta(minutes=int(duration))
-    
+
     return pids, end_time
+
 
 def _start_throttle_bandwidth(limit: int):
     os.system(f'wondershaper enp6s0 {limit} {limit}')
@@ -248,20 +250,21 @@ def _stop_throttle_bandwidth():
 @click.option(
     "--bandwidth_decrease",
     prompt="Duration of bandwidth steps in minutes (0 = no throttling)",
-    required = True,
+    required=True,
     help="The amount you want to throttle every minute.",
 )
-
 def main(process, network_interface, duration, bandwidth_decrease) -> None:
-    
     print('Initialize...')
     pid, end_time = _setup(process, duration)
 
     print('Tracking metrics...')
-    threading.Thread(target=_track_metrics, args=[pid, _get_display_filter(network_interface), 1, end_time, network_interface, int(bandwidth_decrease)]).start()
+    threading.Thread(target=_track_metrics,
+                     args=[pid, _get_display_filter(network_interface), 1, end_time, network_interface,
+                           int(bandwidth_decrease)]).start()
 
     print('Start monitor...')
     threading.Thread(target=_monitor, args=[end_time]).start()
 
-if __name__ == "__main__":    
+
+if __name__ == "__main__":
     main()
