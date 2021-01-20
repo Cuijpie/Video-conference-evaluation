@@ -55,6 +55,7 @@ p <- ggplot(dat.m, aes(data.X, value, color = data.protocol)) +
   guides(fill = guide_legend(reverse=TRUE)) +
   scale_color_discrete(breaks=c("One-on-One", "Classroom Screensharing")) +
   theme_half_open() +
+  theme(strip.background=element_rect(fill='white', color="black")) +
   background_grid(major = "y") +
   theme(legend.title = element_blank(),
         legend.position="bottom",
