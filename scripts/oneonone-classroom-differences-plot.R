@@ -39,30 +39,31 @@ facet_labels <- list(
   'data.cpu_usage' = "Number of CPU cores used per second"
 )
 
+facet_labeller <- function(variable, value) {
+  return(facet_labels[value])
+}
+
 dat.m <- dat.m %>%
   group_by(data.protocol) %>%
   # mutate(markers = ifelse(data.protocol == 'One-on-One'& (row_number() + 200) %% 300 == 0, value, NA))
   mutate(markers = ifelse((data.protocol == 'One-on-One'& (row_number() + 200) %% 300 == 0) | ((data.protocol != 'One-on-One'& (row_number() + 50) %% 300 == 0)), value, NA))
 
-p <- ggplot(dat.m, aes(data.X, value, color = data.protocol)) +
+p <- dat.m %>% 
+  ggplot(aes(x = data.X, y = value, color = data.protocol)) +
   geom_line(aes(linetype = data.protocol), size=0.5) +
-  geom_point(aes(y=markers, shape= data.protocol, color = data.protocol), size=3) +
-  facet_wrap(~ variable, ncol = 1, scales = "free_y", labeller = facet_labeller) +
-  # scale_shape_manual(values=c(21, 24))+
-  scale_x_continuous("Time (s)", breaks = seq(0, 2000, 1000)) +
+  geom_point(aes(y = markers, shape = data.protocol, fill = data.protocol), color="black", size=3) +
+  labs(x="Time (s)") +
   scale_y_log10() +
-  # scale_y_continuous(expand = c(0, 1), limits = c(0, NA)) +
-  guides(fill = guide_legend(reverse=TRUE)) +
   scale_color_discrete(breaks=c("One-on-One", "Classroom Screensharing")) +
-  theme_half_open() +
+  scale_fill_discrete(breaks=c("One-on-One", "Classroom Screensharing")) +
+  scale_shape_manual(values = c(21,24)) +
+  facet_wrap(vars(variable), ncol = 1, scales = "free_y", labeller = facet_labeller) +
+  theme_bw() +
   theme(strip.background=element_rect(fill='white', color="black")) +
-  background_grid(major = "y") +
   theme(legend.title = element_blank(),
         legend.position="bottom",
         axis.title.y.left = element_blank(),
         text = element_text(size = 15),
         strip.text.x = element_text(size = 15))
-
-#last_plot() + aes(group=rev(variable))
 p
-ggsave("../results/oneonone-vs-classroom.pdf", width = 6, height= 5)
+ggsave("../plots/oneonone-vs-classroom.pdf", width = 6, height= 5)
